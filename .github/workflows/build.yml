@@ -18,119 +18,39 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.22'
-
-      - name: Checkout Loyalsoldier/domain-list-custom
-        uses: actions/checkout@v4
-        with:
-          repository: Loyalsoldier/domain-list-custom
-          path: custom
-
-      - name: Checkout v2fly/domain-list-community
-        uses: actions/checkout@v4
-        with:
-          repository: v2fly/domain-list-community
-          path: community
-
-      - name: Checkout MetaCubeX/meta-rules-converter
-        uses: actions/checkout@v4
-        with:
-          repository: MetaCubeX/meta-rules-converter
-          path: converter
-
       - name: Install yq for YAML parsing
         run: |
           sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
           sudo chmod +x /usr/local/bin/yq
 
-      - name: Convert YAML rules to text format
+      - name: Prepare output directories
         run: |
-          mkdir -p ./community/data
-          
-          # 处理 domain 规则 (YAML → text)
-          for file in rules/domain/*.yaml; do
-            [ -f "$file" ] || continue
-            name=$(basename "$file" .yaml)
-            echo "Processing domain rule: $name"
-            
-            # 从 YAML payload 提取域名规则，转换为 domain-list-community 格式
-            yq eval '.payload[]' "$file" | while read -r line; do
-              # 跳过空行和注释
-              [[ -z "$line" || "$line" =~ ^# ]] && continue
-              
-              # 转换规则格式
-              if [[ "$line" =~ ^DOMAIN, ]]; then
-                # DOMAIN,example.com → full:example.com
-                echo "full:${line#DOMAIN,}"
-              elif [[ "$line" =~ ^DOMAIN-SUFFIX, ]]; then
-                # DOMAIN-SUFFIX,example.com → example.com
-                echo "${line#DOMAIN-SUFFIX,}"
-              elif [[ "$line" =~ ^DOMAIN-KEYWORD, ]]; then
-                # DOMAIN-KEYWORD,example → keyword:example
-                echo "keyword:${line#DOMAIN-KEYWORD,}"
-              elif [[ "$line" =~ ^DOMAIN-REGEX, ]]; then
-                # DOMAIN-REGEX,pattern → regexp:pattern
-                echo "regexp:${line#DOMAIN-REGEX,}"
-              else
-                # 直接是域名格式，原样保留
-                echo "$line"
-              fi
-            done > "./community/data/$name"
-            
-            echo "  → Created: community/data/$name"
-            head -5 "./community/data/$name"
-          done
+          mkdir -p output/classical output/ipcidr
 
-      - name: Build geosite.dat
+      - name: Copy domain rules
         run: |
-          cd custom
-          go run ./ --datapath=../community/data
-          
-          mkdir -p ../output
-          cp publish/geosite.dat ../output/
-          echo "✓ Built geosite.dat successfully"
-
-      - name: Convert to MRS (domain rules)
-        run: |
-          mkdir -p output/mrs/domain
-          cd converter
-          
-          go run ./ geosite -f ../output/geosite.dat -o ../output/mrs/domain
-          
-          echo "=== Generated MRS files ==="
-          ls -la ../output/mrs/domain/*.mrs 2>/dev/null || echo "No MRS files generated"
-
-      - name: Copy classical YAML rules
-        run: |
-          mkdir -p output/classical
-          
           # 直接复制 YAML 规则文件
           for file in rules/domain/*.yaml; do
             [ -f "$file" ] || continue
             name=$(basename "$file" .yaml)
             cp "$file" "output/classical/${name}.yaml"
-            echo "Copied: ${name}.yaml"
+            echo "✓ Copied: classical/${name}.yaml"
           done
 
       - name: Copy IP rules
         run: |
-          mkdir -p output/ipcidr
-          
           # 复制 IP 规则
           for file in rules/ip/*.yaml; do
             [ -f "$file" ] || continue
             name=$(basename "$file" .yaml)
             cp "$file" "output/ipcidr/${name}.yaml"
-            echo "Copied: ${name}.yaml"
+            echo "✓ Copied: ipcidr/${name}.yaml"
           done
 
       - name: Generate checksums
         run: |
           cd output
-          find . -type f \( -name "*.mrs" -o -name "*.dat" -o -name "*.yaml" \) \
+          find . -type f -name "*.yaml" \
             -exec sha256sum {} \; > checksums.txt
           echo "=== Checksums ==="
           cat checksums.txt
@@ -154,27 +74,26 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cd output
-          gh release delete latest --cleanup-tag -y || true
+          gh release delete latest --cleanup-tag -y 2>/dev/null || true
           BUILDTIME=$(TZ=Asia/Shanghai date +'%Y-%m-%d %H:%M')
           
           FILES=""
-          [ -d "mrs/domain" ] && FILES="$FILES mrs/domain/*.mrs"
           [ -d "classical" ] && FILES="$FILES classical/*"
           [ -d "ipcidr" ] && FILES="$FILES ipcidr/*"
-          [ -f "geosite.dat" ] && FILES="$FILES geosite.dat"
           [ -f "checksums.txt" ] && FILES="$FILES checksums.txt"
           
-          gh release create latest \
-            --title "Rule Sets ${BUILDTIME}" \
-            --generate-notes \
-            $FILES
+          if [ -n "$FILES" ]; then
+            gh release create latest \
+              --title "Rule Sets ${BUILDTIME}" \
+              --generate-notes \
+              $FILES
+          fi
 
       - name: Purge jsDelivr cache
         run: |
-          if [ -d "output/mrs/domain" ]; then
-            for file in output/mrs/domain/*.mrs; do
-              name=$(basename "$file")
-              echo "Purging cache: $name"
-              curl -s "https://purge.jsdelivr.net/gh/${{ github.repository }}@release/mrs/domain/${name}" || true
-            done
-          fi
+          for file in output/classical/*.yaml; do
+            [ -f "$file" ] || continue
+            name=$(basename "$file")
+            echo "Purging cache: $name"
+            curl -s "https://purge.jsdelivr.net/gh/${{ github.repository }}@release/classical/${name}" || true
+          done
