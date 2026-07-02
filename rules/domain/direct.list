@@ -1,6 +1,8 @@
 # 直连域名规则
 # 格式说明：
 #   example.com        → DOMAIN-SUFFIX（匹配子域名）
+#   .example.com       → DOMAIN-SUFFIX（同上，. 前缀写法）
+#   +.example.com      → DOMAIN-SUFFIX（同上，+. 前缀写法）
 #   full:example.com   → DOMAIN（精确匹配）
 #   keyword:example    → DOMAIN-KEYWORD（关键词匹配）
 #   regexp:.*\.cn$     → DOMAIN-REGEX（正则匹配）
