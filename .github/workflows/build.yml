@@ -18,102 +18,24 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.22'
-
-      - name: Checkout tools
-        uses: actions/checkout@v4
-        with:
-          repository: Loyalsoldier/domain-list-custom
-          path: custom
-
-      - name: Checkout converter
-        uses: actions/checkout@v4
-        with:
-          repository: MetaCubeX/meta-rules-converter
-          path: converter
-
-      - name: Prepare data
+      - name: Prepare output
         run: |
-          mkdir -p community/data output/classical output/ipcidr
-          
-          # 转换 domain YAML → domain-list-community 格式
-          for file in rules/domain/*.yaml; do
-            [ -f "$file" ] || continue
-            name=$(basename "$file" .yaml)
-            
-            # 提取 payload 并转换格式
-            python3 -c "
-          import yaml, sys
-          with open('$file') as f:
-              data = yaml.safe_load(f)
-          for rule in data.get('payload', []):
-              if rule.startswith('DOMAIN-SUFFIX,'):
-                  print(rule.replace('DOMAIN-SUFFIX,', ''))
-              elif rule.startswith('DOMAIN,'):
-                  print('full:' + rule.replace('DOMAIN,', ''))
-              elif rule.startswith('DOMAIN-KEYWORD,'):
-                  print('keyword:' + rule.replace('DOMAIN-KEYWORD,', ''))
-              elif rule.startswith('DOMAIN-REGEX,'):
-                  print('regexp:' + rule.replace('DOMAIN-REGEX,', ''))
-          " > "community/data/$name"
-            
-            # 同时复制 YAML 到 classical 目录
-            cp "$file" "output/classical/${name}.yaml"
-            echo "✓ Processed: $name"
-          done
-
-      - name: Build geosite.dat
-        run: |
-          cd custom
-          go run ./ --datapath=../community/data
-          cp publish/geosite.dat ../output/
-          echo "✓ Built geosite.dat"
-
-      - name: Convert to MRS
-        run: |
-          cd converter
-          go run ./ geosite -f ../output/geosite.dat -o ../output/mrs
-          echo "✓ Converted to MRS"
-
-      - name: Copy IP rules
-        run: |
-          for file in rules/ip/*.yaml; do
-            [ -f "$file" ] || continue
-            cp "$file" "output/ipcidr/$(basename "$file")"
-          done
-
-      - name: Organize output for release branch
-        run: |
-          # 把 MRS 文件放到对应目录
           mkdir -p release/rules/domain release/rules/ip
           
-          # 复制 domain MRS 文件
-          if [ -d "output/mrs" ]; then
-            for file in output/mrs/*.mrs; do
-              [ -f "$file" ] || continue
-              name=$(basename "$file")
-              cp "$file" "release/rules/domain/${name}"
-              echo "✓ MRS: rules/domain/${name}"
-            done
-          fi
-          
-          # 复制 domain YAML 文件
-          for file in output/classical/*.yaml; do
+          # 复制 domain 规则
+          for file in rules/domain/*.yaml; do
             [ -f "$file" ] || continue
             name=$(basename "$file")
             cp "$file" "release/rules/domain/${name}"
-            echo "✓ YAML: rules/domain/${name}"
+            echo "✓ domain: ${name}"
           done
           
           # 复制 IP 规则
-          for file in output/ipcidr/*.yaml; do
+          for file in rules/ip/*.yaml; do
             [ -f "$file" ] || continue
             name=$(basename "$file")
             cp "$file" "release/rules/ip/${name}"
-            echo "✓ YAML: rules/ip/${name}"
+            echo "✓ ip: ${name}"
           done
 
       - name: Push to release branch
@@ -133,10 +55,8 @@ jobs:
 
       - name: Purge jsDelivr cache
         run: |
-          if [ -d "release/rules/domain" ]; then
-            for file in release/rules/domain/*.mrs; do
-              [ -f "$file" ] || continue
-              name=$(basename "$file")
-              curl -s "https://purge.jsdelivr.net/gh/${{ github.repository }}@release/rules/domain/${name}" || true
-            done
-          fi
+          for file in release/rules/domain/*.yaml; do
+            [ -f "$file" ] || continue
+            name=$(basename "$file")
+            curl -s "https://purge.jsdelivr.net/gh/${{ github.repository }}@release/rules/domain/${name}" || true
+          done
