@@ -1,0 +1,18 @@
+# 直连域名规则
+# 格式：DOMAIN-SUFFIX, 域名
+# 
+# 等同于 domain-list-community 的 +.example.com
+
+payload:
+  - DOMAIN-SUFFIX,baidu.com
+  - DOMAIN-SUFFIX,taobao.com
+  - DOMAIN-SUFFIX,tmall.com
+  - DOMAIN-SUFFIX,jd.com
+  - DOMAIN-SUFFIX,bilibili.com
+  - DOMAIN-SUFFIX,qq.com
+  - DOMAIN-SUFFIX,weixin.qq.com
+  - DOMAIN-SUFFIX,163.com
+  - DOMAIN-SUFFIX,126.com
+  - DOMAIN-SUFFIX,zhihu.com
+  - DOMAIN-SUFFIX,douyin.com
+  - DOMAIN-SUFFIX,bytedance.com

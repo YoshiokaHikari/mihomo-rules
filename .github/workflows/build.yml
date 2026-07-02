@@ -41,17 +41,47 @@ jobs:
           repository: MetaCubeX/meta-rules-converter
           path: converter
 
-      - name: Prepare domain data files
+      - name: Install yq for YAML parsing
         run: |
-          # 将自定义规则复制到 community/data 目录
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Convert YAML rules to text format
+        run: |
           mkdir -p ./community/data
           
-          # 处理 domain 规则
-          for file in rules/domain/*.txt; do
+          # 处理 domain 规则 (YAML → text)
+          for file in rules/domain/*.yaml; do
             [ -f "$file" ] || continue
-            name=$(basename "$file" .txt)
-            cp "$file" "./community/data/$name"
-            echo "Added domain rule: $name"
+            name=$(basename "$file" .yaml)
+            echo "Processing domain rule: $name"
+            
+            # 从 YAML payload 提取域名规则，转换为 domain-list-community 格式
+            yq eval '.payload[]' "$file" | while read -r line; do
+              # 跳过空行和注释
+              [[ -z "$line" || "$line" =~ ^# ]] && continue
+              
+              # 转换规则格式
+              if [[ "$line" =~ ^DOMAIN, ]]; then
+                # DOMAIN,example.com → full:example.com
+                echo "full:${line#DOMAIN,}"
+              elif [[ "$line" =~ ^DOMAIN-SUFFIX, ]]; then
+                # DOMAIN-SUFFIX,example.com → example.com
+                echo "${line#DOMAIN-SUFFIX,}"
+              elif [[ "$line" =~ ^DOMAIN-KEYWORD, ]]; then
+                # DOMAIN-KEYWORD,example → keyword:example
+                echo "keyword:${line#DOMAIN-KEYWORD,}"
+              elif [[ "$line" =~ ^DOMAIN-REGEX, ]]; then
+                # DOMAIN-REGEX,pattern → regexp:pattern
+                echo "regexp:${line#DOMAIN-REGEX,}"
+              else
+                # 直接是域名格式，原样保留
+                echo "$line"
+              fi
+            done > "./community/data/$name"
+            
+            echo "  → Created: community/data/$name"
+            head -5 "./community/data/$name"
           done
 
       - name: Build geosite.dat
@@ -59,51 +89,30 @@ jobs:
           cd custom
           go run ./ --datapath=../community/data
           
-          # 确保输出目录存在
           mkdir -p ../output
           cp publish/geosite.dat ../output/
-          echo "Built geosite.dat successfully"
+          echo "✓ Built geosite.dat successfully"
 
       - name: Convert to MRS (domain rules)
         run: |
           mkdir -p output/mrs/domain
           cd converter
           
-          # 转换 geosite.dat → .mrs 文件
           go run ./ geosite -f ../output/geosite.dat -o ../output/mrs/domain
           
           echo "=== Generated MRS files ==="
           ls -la ../output/mrs/domain/*.mrs 2>/dev/null || echo "No MRS files generated"
 
-      - name: Build classical rules
+      - name: Copy classical YAML rules
         run: |
           mkdir -p output/classical
           
-          # 将 txt 规则转为各种格式
-          for file in rules/domain/*.txt; do
+          # 直接复制 YAML 规则文件
+          for file in rules/domain/*.yaml; do
             [ -f "$file" ] || continue
-            name=$(basename "$file" .txt)
-            
-            # 创建 YAML 格式（classical）
-            echo "payload:" > "output/classical/${name}.yaml"
-            while IFS= read -r line; do
-              # 跳过空行和注释
-              [[ -z "$line" || "$line" =~ ^# ]] && continue
-              
-              # 根据前缀转换为 Clash 规则格式
-              if [[ "$line" =~ ^full: ]]; then
-                echo "  - DOMAIN,${line#full:}" >> "output/classical/${name}.yaml"
-              elif [[ "$line" =~ ^keyword: ]]; then
-                echo "  - DOMAIN-KEYWORD,${line#keyword:}" >> "output/classical/${name}.yaml"
-              elif [[ "$line" =~ ^regexp: ]]; then
-                echo "  - DOMAIN-REGEX,${line#regexp:}" >> "output/classical/${name}.yaml"
-              else
-                echo "  - DOMAIN-SUFFIX,${line}" >> "output/classical/${name}.yaml"
-              fi
-            done < "$file"
-            
-            # 创建纯文本格式（domain format: text）
-            grep -v '^#' "$file" | grep -v '^$' > "output/classical/${name}.list" || true
+            name=$(basename "$file" .yaml)
+            cp "$file" "output/classical/${name}.yaml"
+            echo "Copied: ${name}.yaml"
           done
 
       - name: Copy IP rules
@@ -111,17 +120,19 @@ jobs:
           mkdir -p output/ipcidr
           
           # 复制 IP 规则
-          for file in rules/ip/*.txt; do
+          for file in rules/ip/*.yaml; do
             [ -f "$file" ] || continue
-            name=$(basename "$file" .txt)
-            grep -v '^#' "$file" | grep -v '^$' > "output/ipcidr/${name}.list" || true
+            name=$(basename "$file" .yaml)
+            cp "$file" "output/ipcidr/${name}.yaml"
+            echo "Copied: ${name}.yaml"
           done
 
       - name: Generate checksums
         run: |
           cd output
-          find . -type f \( -name "*.mrs" -o -name "*.dat" -o -name "*.list" -o -name "*.yaml" \) \
+          find . -type f \( -name "*.mrs" -o -name "*.dat" -o -name "*.yaml" \) \
             -exec sha256sum {} \; > checksums.txt
+          echo "=== Checksums ==="
           cat checksums.txt
 
       - name: Publish to release branch
@@ -146,7 +157,6 @@ jobs:
           gh release delete latest --cleanup-tag -y || true
           BUILDTIME=$(TZ=Asia/Shanghai date +'%Y-%m-%d %H:%M')
           
-          # 收集所有要发布的文件
           FILES=""
           [ -d "mrs/domain" ] && FILES="$FILES mrs/domain/*.mrs"
           [ -d "classical" ] && FILES="$FILES classical/*"
@@ -164,7 +174,7 @@ jobs:
           if [ -d "output/mrs/domain" ]; then
             for file in output/mrs/domain/*.mrs; do
               name=$(basename "$file")
-              echo "Purging cache for: $name"
+              echo "Purging cache: $name"
               curl -s "https://purge.jsdelivr.net/gh/${{ github.repository }}@release/mrs/domain/${name}" || true
             done
           fi
