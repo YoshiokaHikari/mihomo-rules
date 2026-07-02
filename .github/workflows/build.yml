@@ -18,24 +18,179 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Prepare output
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Checkout domain-list-custom
+        uses: actions/checkout@v4
+        with:
+          repository: Loyalsoldier/domain-list-custom
+          path: custom
+
+      - name: Checkout meta-rules-converter
+        uses: actions/checkout@v4
+        with:
+          repository: MetaCubeX/meta-rules-converter
+          path: converter
+
+      - name: Prepare data files
+        run: |
+          mkdir -p community/data
+          
+          # 复制 domain 规则到 community/data
+          for file in rules/domain/*.txt; do
+            [ -f "$file" ] || continue
+            name=$(basename "$file" .txt)
+            # 去掉注释和空行，复制到 community/data
+            grep -v '^#' "$file" | grep -v '^$' > "community/data/$name"
+            echo "✓ domain: $name ($(wc -l < "community/data/$name") rules)"
+          done
+
+      - name: Build geosite.dat
+        run: |
+          cd custom
+          go run ./ --datapath=../community/data
+          mkdir -p ../output
+          cp publish/geosite.dat ../output/
+          echo "✓ Built geosite.dat"
+
+      - name: Convert to MRS
+        run: |
+          mkdir -p output/mrs
+          cd converter
+          go run ./ geosite -f ../output/geosite.dat -o ../output/mrs
+          echo "✓ Converted to MRS"
+          ls -la ../output/mrs/*.mrs 2>/dev/null | head -10
+
+      - name: Generate classical YAML from text
+        run: |
+          mkdir -p output/yaml/domain output/yaml/ip
+          
+          # 转换 domain 文本 → classical YAML
+          for file in rules/domain/*.txt; do
+            [ -f "$file" ] || continue
+            name=$(basename "$file" .txt)
+            
+            python3 << 'PYEOF'
+          import sys
+          
+          input_file = sys.argv[1]
+          output_file = sys.argv[2]
+          
+          rules = []
+          with open(input_file) as f:
+              for line in f:
+                  line = line.strip()
+                  if not line or line.startswith('#'):
+                      continue
+                  
+                  if line.startswith('full:'):
+                      rules.append(f"  - DOMAIN,{line[5:]}")
+                  elif line.startswith('keyword:'):
+                      rules.append(f"  - DOMAIN-KEYWORD,{line[8:]}")
+                  elif line.startswith('regexp:'):
+                      rules.append(f"  - DOMAIN-REGEX,{line[7:]}")
+                  else:
+                      rules.append(f"  - DOMAIN-SUFFIX,{line}")
+          
+          with open(output_file, 'w') as f:
+              f.write("payload:\n")
+              for rule in rules:
+                  f.write(rule + "\n")
+          PYEOF
+            python3 "$file" "output/yaml/domain/${name}.yaml" 2>/dev/null || \
+              python3 -c "
+          import sys
+          rules = []
+          with open('$file') as f:
+              for line in f:
+                  line = line.strip()
+                  if not line or line.startswith('#'):
+                      continue
+                  if line.startswith('full:'):
+                      rules.append(f'  - DOMAIN,{line[5:]}')
+                  elif line.startswith('keyword:'):
+                      rules.append(f'  - DOMAIN-KEYWORD,{line[8:]}')
+                  elif line.startswith('regexp:'):
+                      rules.append(f'  - DOMAIN-REGEX,{line[7:]}')
+                  else:
+                      rules.append(f'  - DOMAIN-SUFFIX,{line}')
+          with open('output/yaml/domain/${name}.yaml', 'w') as f:
+              f.write('payload:\n')
+              for rule in rules:
+                  f.write(rule + '\n')
+          "
+            echo "✓ YAML: domain/${name}.yaml"
+          done
+          
+          # 复制 IP 规则（保持原样，因为 IP 规则用 classical 格式）
+          for file in rules/ip/*.txt; do
+            [ -f "$file" ] || continue
+            name=$(basename "$file" .txt)
+            
+            python3 -c "
+          rules = []
+          with open('$file') as f:
+              for line in f:
+                  line = line.strip()
+                  if not line or line.startswith('#'):
+                      continue
+                  # 检查是否已经是 IP-CIDR 格式
+                  if '/' in line and not line.startswith('IP-'):
+                      rules.append(f'  - IP-CIDR,{line}')
+                  else:
+                      rules.append(f'  - {line}')
+          with open('output/yaml/ip/${name}.yaml', 'w') as f:
+              f.write('payload:\n')
+              for rule in rules:
+                  f.write(rule + '\n')
+          "
+            echo "✓ YAML: ip/${name}.yaml"
+          done
+
+      - name: Prepare release directory
         run: |
           mkdir -p release/rules/domain release/rules/ip
           
-          # 复制 domain 规则
-          for file in rules/domain/*.yaml; do
+          # 复制 MRS 文件
+          for file in output/mrs/*.mrs; do
             [ -f "$file" ] || continue
             name=$(basename "$file")
             cp "$file" "release/rules/domain/${name}"
-            echo "✓ domain: ${name}"
+            echo "✓ MRS: domain/${name}"
+          done
+          
+          # 复制 domain 文本文件
+          for file in rules/domain/*.txt; do
+            [ -f "$file" ] || continue
+            name=$(basename "$file")
+            cp "$file" "release/rules/domain/${name}"
+            echo "✓ TXT: domain/${name}"
+          done
+          
+          # 复制 domain YAML 文件
+          for file in output/yaml/domain/*.yaml; do
+            [ -f "$file" ] || continue
+            name=$(basename "$file")
+            cp "$file" "release/rules/domain/${name}"
+            echo "✓ YAML: domain/${name}"
           done
           
           # 复制 IP 规则
-          for file in rules/ip/*.yaml; do
+          for file in rules/ip/*.txt; do
             [ -f "$file" ] || continue
             name=$(basename "$file")
             cp "$file" "release/rules/ip/${name}"
-            echo "✓ ip: ${name}"
+            echo "✓ TXT: ip/${name}"
+          done
+          
+          for file in output/yaml/ip/*.yaml; do
+            [ -f "$file" ] || continue
+            name=$(basename "$file")
+            cp "$file" "release/rules/ip/${name}"
+            echo "✓ YAML: ip/${name}"
           done
 
       - name: Push to release branch
@@ -55,7 +210,7 @@ jobs:
 
       - name: Purge jsDelivr cache
         run: |
-          for file in release/rules/domain/*.yaml; do
+          for file in release/rules/domain/*.mrs; do
             [ -f "$file" ] || continue
             name=$(basename "$file")
             curl -s "https://purge.jsdelivr.net/gh/${{ github.repository }}@release/rules/domain/${name}" || true
