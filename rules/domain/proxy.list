@@ -1,16 +1,7 @@
-# 代理域名规则
-# 格式说明：
-#   example.com        → DOMAIN-SUFFIX（匹配子域名）
-#   .example.com       → DOMAIN-SUFFIX（同上，. 前缀写法）
-#   +.example.com      → DOMAIN-SUFFIX（同上，+. 前缀写法）
-#   full:example.com   → DOMAIN（精确匹配）
-#   keyword:example    → DOMAIN-KEYWORD（关键词匹配）
-#   regexp:.*\.cn$     → DOMAIN-REGEX（正则匹配）
-
 +.dmm.co.jp
 +.cloudflare.com
-full:share.dmhy.org
-full:u2.dmhy.org
+share.dmhy.org
+u2.dmhy.org
 +.api.64clouds.com
 +.bgm.tv
 +.bangumi.tv
@@ -19,3 +10,5 @@ full:u2.dmhy.org
 +.ubuntu.com
 +.202317.xyz
 +.brew.sh
++.cnfaster.com
++.akile.net
