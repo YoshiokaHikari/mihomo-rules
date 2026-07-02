@@ -1,0 +1,170 @@
+name: Build Mihomo Rule Sets
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'rules/**'
+      - '.github/workflows/build.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Checkout Loyalsoldier/domain-list-custom
+        uses: actions/checkout@v4
+        with:
+          repository: Loyalsoldier/domain-list-custom
+          path: custom
+
+      - name: Checkout v2fly/domain-list-community
+        uses: actions/checkout@v4
+        with:
+          repository: v2fly/domain-list-community
+          path: community
+
+      - name: Checkout MetaCubeX/meta-rules-converter
+        uses: actions/checkout@v4
+        with:
+          repository: MetaCubeX/meta-rules-converter
+          path: converter
+
+      - name: Prepare domain data files
+        run: |
+          # 将自定义规则复制到 community/data 目录
+          mkdir -p ./community/data
+          
+          # 处理 domain 规则
+          for file in rules/domain/*.txt; do
+            [ -f "$file" ] || continue
+            name=$(basename "$file" .txt)
+            cp "$file" "./community/data/$name"
+            echo "Added domain rule: $name"
+          done
+
+      - name: Build geosite.dat
+        run: |
+          cd custom
+          go run ./ --datapath=../community/data
+          
+          # 确保输出目录存在
+          mkdir -p ../output
+          cp publish/geosite.dat ../output/
+          echo "Built geosite.dat successfully"
+
+      - name: Convert to MRS (domain rules)
+        run: |
+          mkdir -p output/mrs/domain
+          cd converter
+          
+          # 转换 geosite.dat → .mrs 文件
+          go run ./ geosite -f ../output/geosite.dat -o ../output/mrs/domain
+          
+          echo "=== Generated MRS files ==="
+          ls -la ../output/mrs/domain/*.mrs 2>/dev/null || echo "No MRS files generated"
+
+      - name: Build classical rules
+        run: |
+          mkdir -p output/classical
+          
+          # 将 txt 规则转为各种格式
+          for file in rules/domain/*.txt; do
+            [ -f "$file" ] || continue
+            name=$(basename "$file" .txt)
+            
+            # 创建 YAML 格式（classical）
+            echo "payload:" > "output/classical/${name}.yaml"
+            while IFS= read -r line; do
+              # 跳过空行和注释
+              [[ -z "$line" || "$line" =~ ^# ]] && continue
+              
+              # 根据前缀转换为 Clash 规则格式
+              if [[ "$line" =~ ^full: ]]; then
+                echo "  - DOMAIN,${line#full:}" >> "output/classical/${name}.yaml"
+              elif [[ "$line" =~ ^keyword: ]]; then
+                echo "  - DOMAIN-KEYWORD,${line#keyword:}" >> "output/classical/${name}.yaml"
+              elif [[ "$line" =~ ^regexp: ]]; then
+                echo "  - DOMAIN-REGEX,${line#regexp:}" >> "output/classical/${name}.yaml"
+              else
+                echo "  - DOMAIN-SUFFIX,${line}" >> "output/classical/${name}.yaml"
+              fi
+            done < "$file"
+            
+            # 创建纯文本格式（domain format: text）
+            grep -v '^#' "$file" | grep -v '^$' > "output/classical/${name}.list" || true
+          done
+
+      - name: Copy IP rules
+        run: |
+          mkdir -p output/ipcidr
+          
+          # 复制 IP 规则
+          for file in rules/ip/*.txt; do
+            [ -f "$file" ] || continue
+            name=$(basename "$file" .txt)
+            grep -v '^#' "$file" | grep -v '^$' > "output/ipcidr/${name}.list" || true
+          done
+
+      - name: Generate checksums
+        run: |
+          cd output
+          find . -type f \( -name "*.mrs" -o -name "*.dat" -o -name "*.list" -o -name "*.yaml" \) \
+            -exec sha256sum {} \; > checksums.txt
+          cat checksums.txt
+
+      - name: Publish to release branch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd output
+          git init
+          git config --local user.name "github-actions[bot]"
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b release
+          git add .
+          git commit -m "Release $(TZ=Asia/Shanghai date +'%Y-%m-%d %H:%M')"
+          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}"
+          git push -f -u origin release
+
+      - name: Create GitHub release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd output
+          gh release delete latest --cleanup-tag -y || true
+          BUILDTIME=$(TZ=Asia/Shanghai date +'%Y-%m-%d %H:%M')
+          
+          # 收集所有要发布的文件
+          FILES=""
+          [ -d "mrs/domain" ] && FILES="$FILES mrs/domain/*.mrs"
+          [ -d "classical" ] && FILES="$FILES classical/*"
+          [ -d "ipcidr" ] && FILES="$FILES ipcidr/*"
+          [ -f "geosite.dat" ] && FILES="$FILES geosite.dat"
+          [ -f "checksums.txt" ] && FILES="$FILES checksums.txt"
+          
+          gh release create latest \
+            --title "Rule Sets ${BUILDTIME}" \
+            --generate-notes \
+            $FILES
+
+      - name: Purge jsDelivr cache
+        run: |
+          if [ -d "output/mrs/domain" ]; then
+            for file in output/mrs/domain/*.mrs; do
+              name=$(basename "$file")
+              echo "Purging cache for: $name"
+              curl -s "https://purge.jsdelivr.net/gh/${{ github.repository }}@release/mrs/domain/${name}" || true
+            done
+          fi
