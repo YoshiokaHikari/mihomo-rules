@@ -1,0 +1,19 @@
+# 广告和追踪域名
+# 用于 REJECT 规则
+
+# 常见广告域名
+ads.google.com
+pagead2.googlesyndication.com
+adservice.google.com
+googleads.g.doubleclick.net
+
+# Facebook 追踪
+pixel.facebook.com
+graph.facebook.com
+
+# 常见追踪
+analytics.google.com
+stats.g.doubleclick.net
+
+# 注释：完整的广告过滤列表建议使用专门的规则集
+# 如：https://github.com/privacy-protection-tools/anti-AD

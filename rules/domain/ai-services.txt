@@ -1,0 +1,42 @@
+# AI 服务域名
+# 用于代理规则
+
+# OpenAI
+openai.com
+ai.com
+chatgpt.com
+oaiusercontent.com
+auth0.openai.com
+chat.openai.com
+api.openai.com
+platform.openai.com
+
+# Anthropic (Claude)
+anthropic.com
+claude.ai
+console.anthropic.com
+
+# Google AI
+bard.google.com
+gemini.google.com
+ai.google.com
+deepmind.google.com
+makersuite.google.com
+aistudio.google.com
+
+# Midjourney
+midjourney.com
+cdn.midjourney.com
+
+# Stable Diffusion
+stability.ai
+huggingface.co
+hf.space
+
+# Perplexity
+perplexity.ai
+www.perplexity.ai
+
+# Poe
+poe.com
+www.poe.com
