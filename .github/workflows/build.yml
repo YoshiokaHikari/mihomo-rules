@@ -18,44 +18,25 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Install yq for YAML parsing
-        run: |
-          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-          sudo chmod +x /usr/local/bin/yq
-
-      - name: Prepare output directories
+      - name: Prepare output
         run: |
           mkdir -p output/classical output/ipcidr
-
-      - name: Copy domain rules
-        run: |
-          # 直接复制 YAML 规则文件
+          
+          # 复制域名规则
           for file in rules/domain/*.yaml; do
             [ -f "$file" ] || continue
-            name=$(basename "$file" .yaml)
-            cp "$file" "output/classical/${name}.yaml"
-            echo "✓ Copied: classical/${name}.yaml"
+            cp "$file" "output/classical/$(basename "$file")"
+            echo "✓ $(basename "$file")"
           done
-
-      - name: Copy IP rules
-        run: |
+          
           # 复制 IP 规则
           for file in rules/ip/*.yaml; do
             [ -f "$file" ] || continue
-            name=$(basename "$file" .yaml)
-            cp "$file" "output/ipcidr/${name}.yaml"
-            echo "✓ Copied: ipcidr/${name}.yaml"
+            cp "$file" "output/ipcidr/$(basename "$file")"
+            echo "✓ $(basename "$file")"
           done
 
-      - name: Generate checksums
-        run: |
-          cd output
-          find . -type f -name "*.yaml" \
-            -exec sha256sum {} \; > checksums.txt
-          echo "=== Checksums ==="
-          cat checksums.txt
-
-      - name: Publish to release branch
+      - name: Push to release branch
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -68,32 +49,12 @@ jobs:
           git commit -m "Release $(TZ=Asia/Shanghai date +'%Y-%m-%d %H:%M')"
           git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}"
           git push -f -u origin release
-
-      - name: Create GitHub release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          cd output
-          gh release delete latest --cleanup-tag -y 2>/dev/null || true
-          BUILDTIME=$(TZ=Asia/Shanghai date +'%Y-%m-%d %H:%M')
-          
-          FILES=""
-          [ -d "classical" ] && FILES="$FILES classical/*"
-          [ -d "ipcidr" ] && FILES="$FILES ipcidr/*"
-          [ -f "checksums.txt" ] && FILES="$FILES checksums.txt"
-          
-          if [ -n "$FILES" ]; then
-            gh release create latest \
-              --title "Rule Sets ${BUILDTIME}" \
-              --generate-notes \
-              $FILES
-          fi
+          echo "✅ Published to release branch"
 
       - name: Purge jsDelivr cache
         run: |
           for file in output/classical/*.yaml; do
             [ -f "$file" ] || continue
             name=$(basename "$file")
-            echo "Purging cache: $name"
             curl -s "https://purge.jsdelivr.net/gh/${{ github.repository }}@release/classical/${name}" || true
           done
