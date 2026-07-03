@@ -18,83 +18,48 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.22'
-
-      - name: Checkout domain-list-custom
-        uses: actions/checkout@v4
-        with:
-          repository: Loyalsoldier/domain-list-custom
-          path: custom
-
-      - name: Checkout meta-rules-converter
-        uses: actions/checkout@v4
-        with:
-          repository: MetaCubeX/meta-rules-converter
-          path: converter
-
-      - name: Prepare data files
+      - name: Download mihomo
         run: |
-          mkdir -p community/data
-          
-          # 创建必要的占位文件
-          touch community/data/cn
-          touch "community/data/geolocation-!cn"
-          
-          # 复制 domain 规则到 community/data
-          for file in rules/domain/*.list; do
-            [ -f "$file" ] || continue
-            name=$(basename "$file" .list)
-            # 去掉注释和空行
-            grep -v '^#' "$file" | grep -v '^$' > "community/data/$name"
-            echo "✓ domain: $name ($(wc -l < "community/data/$name") rules)"
-          done
+          curl -sL "https://github.com/MetaCubeX/mihomo/releases/latest/download/mihomo-linux-amd64-compatible.gz" | gunzip > /usr/local/bin/mihomo
+          chmod +x /usr/local/bin/mihomo
+          mihomo -v
 
-      - name: Build geosite.dat
-        run: |
-          cd custom
-          go run ./ --datapath=../community/data
-          mkdir -p ../output
-          cp publish/geosite.dat ../output/
-          echo "✓ Built geosite.dat"
-
-      - name: Convert to MRS
-        run: |
-          mkdir -p output/mrs
-          cd converter
-          go run ./ geosite -f ../output/geosite.dat -o ../output/mrs
-          echo "✓ Converted to MRS"
-          ls -la ../output/mrs/*.mrs 2>/dev/null | head -10
-
-      - name: Prepare release directory
+      - name: Convert .list to .mrs
         run: |
           mkdir -p release/rules/domain release/rules/ip
           
-          # 复制 MRS 文件到 domain 目录
-          for file in output/mrs/*.mrs; do
-            [ -f "$file" ] || continue
-            name=$(basename "$file")
-            cp "$file" "release/rules/domain/${name}"
-            echo "✓ MRS: rules/domain/${name}"
-          done
-          
-          # 复制 domain list 文件
+          # 转换 domain 规则
           for file in rules/domain/*.list; do
             [ -f "$file" ] || continue
-            name=$(basename "$file")
-            cp "$file" "release/rules/domain/${name}"
-            echo "✓ LIST: rules/domain/${name}"
+            name=$(basename "$file" .list)
+            # 去掉注释和空行，生成干净的临时文件
+            grep -v '^#' "$file" | grep -v '^$' > "/tmp/${name}.txt"
+            # 转换为 MRS
+            mihomo convert-ruleset domain text "/tmp/${name}.txt" "release/rules/domain/${name}.mrs"
+            echo "✓ MRS: rules/domain/${name}.mrs ($(wc -l < "/tmp/${name}.txt") rules)"
+            # 复制原始 .list 文件
+            cp "$file" "release/rules/domain/${name}.list"
+            echo "✓ LIST: rules/domain/${name}.list"
           done
           
-          # 复制 IP list 文件
+          # 转换 ip 规则
           for file in rules/ip/*.list; do
             [ -f "$file" ] || continue
-            name=$(basename "$file")
-            cp "$file" "release/rules/ip/${name}"
-            echo "✓ LIST: rules/ip/${name}"
+            name=$(basename "$file" .list)
+            grep -v '^#' "$file" | grep -v '^$' > "/tmp/${name}.txt"
+            mihomo convert-ruleset ipcidr text "/tmp/${name}.txt" "release/rules/ip/${name}.mrs"
+            echo "✓ MRS: rules/ip/${name}.mrs ($(wc -l < "/tmp/${name}.txt") rules)"
+            cp "$file" "release/rules/ip/${name}.list"
+            echo "✓ LIST: rules/ip/${name}.list"
           done
+
+      - name: Verify MRS files
+        run: |
+          echo "=== MRS files ==="
+          find release -name "*.mrs" -exec ls -la {} \;
+          echo ""
+          echo "=== LIST files ==="
+          find release -name "*.list" -exec ls -la {} \;
 
       - name: Push to release branch
         env:
@@ -107,13 +72,18 @@ jobs:
           git checkout -b release
           git add .
           git commit -m "Release $(TZ=Asia/Shanghai date +'%Y-%m-%d %H:%M')"
-          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}"
+          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
           git push -f -u origin release
           echo "✅ Published to release branch"
 
       - name: Purge jsDelivr cache
         run: |
           for file in release/rules/domain/*.mrs; do
+            [ -f "$file" ] || continue
+            name=$(basename "$file")
+            curl -s "https://purge.jsdelivr.net/gh/${{ github.repository }}@release/rules/domain/${name}" || true
+          done
+          for file in release/rules/domain/*.list; do
             [ -f "$file" ] || continue
             name=$(basename "$file")
             curl -s "https://purge.jsdelivr.net/gh/${{ github.repository }}@release/rules/domain/${name}" || true
