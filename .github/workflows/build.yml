@@ -20,7 +20,8 @@ jobs:
 
       - name: Download mihomo
         run: |
-          curl -sL "https://github.com/MetaCubeX/mihomo/releases/latest/download/mihomo-linux-amd64-compatible.gz" | gunzip > /usr/local/bin/mihomo
+          MIHOMO_VERSION=$(curl -s "https://api.github.com/repos/MetaCubeX/mihomo/releases/latest" | grep '"tag_name"' | sed -E 's/.*"v([^"]+)".*/\1/')
+          curl -sL "https://github.com/MetaCubeX/mihomo/releases/download/v${MIHOMO_VERSION}/mihomo-linux-amd64-compatible-v${MIHOMO_VERSION}.gz" | gunzip > /usr/local/bin/mihomo
           chmod +x /usr/local/bin/mihomo
           mihomo -v
 
