@@ -8,6 +8,11 @@ on:
       - 'rules/**'
       - '.github/workflows/build.yml'
 
+# Avoid concurrent builds racing to force-push different snapshots to release.
+concurrency:
+  group: mihomo-rules-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -112,13 +117,16 @@ jobs:
 
       - name: Purge jsDelivr cache
         run: |
-          for file in release/rules/domain/*.mrs; do
-            [ -f "$file" ] || continue
-            name=$(basename "$file")
-            curl -s "https://purge.jsdelivr.net/gh/${{ github.repository }}@release/rules/domain/${name}" || true
-          done
-          for file in release/rules/domain/*.list; do
-            [ -f "$file" ] || continue
-            name=$(basename "$file")
-            curl -s "https://purge.jsdelivr.net/gh/${{ github.repository }}@release/rules/domain/${name}" || true
+          set -euo pipefail
+          for type in domain ip; do
+            for ext in mrs list; do
+              for file in "release/rules/${type}"/*."${ext}"; do
+                [ -f "$file" ] || continue
+                name=$(basename "$file")
+                url="https://purge.jsdelivr.net/gh/${{ github.repository }}@release/rules/${type}/${name}"
+                if ! curl --fail --silent --show-error --location --retry 3 --retry-all-errors "$url"; then
+                  echo "::warning::Failed to purge jsDelivr cache for rules/${type}/${name}"
+                fi
+              done
+            done
           done
